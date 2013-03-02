@@ -664,12 +664,15 @@ check_single_lib () {
 check_lib_compile () {
     local file=`dirname $0`/mk/gen/check_$1.cc
     local code
-    lookup "$lib_test_code" $1 code
-    echo "$code" > "$file"
-    if $CXX ${CXXFLAGS:-} ${LDFLAGS:-} "$file" -l$1 ${LIBRARY_PATHS:-} -o "$(subst "$file" ".cc" ".out")" 1>/dev/null 2>&1; then
-	var_append LIBRARY_PATHS -l$1
-    elif contains "$support_deps" $1 && $allow_fetch; then
-        fetch_lib $1
+    if lookup "$lib_test_code" $1 code; then
+        echo "$code" > "$file"
+        if $CXX ${CXXFLAGS:-} ${LDFLAGS:-} "$file" -l$1 ${LIBRARY_PATHS:-} -o "$(subst "$file" ".cc" ".out")" 1>/dev/null 2>&1; then
+	    var_append LIBRARY_PATHS -l$1
+        elif contains "$support_deps" $1 && $allow_fetch; then
+            fetch_lib $1
+        else
+            error "library $1 not found"
+        fi
     else
         error "library $1 not found"
     fi
