@@ -21,7 +21,7 @@ init () {
     other_libs="unwind tcmalloc_minimal"
     all_libs="$required_libs $other_libs"
     support_libs="unwind tcmalloc_minimal v8 protobuf"
-    suggested_static="boost_serialization boost_program_options protobuf"
+    suggested_static="protobuf"
     recommended_static="tcmalloc_minimal"
 
     web_assets_deps="lessc coffee handlebars"
@@ -598,20 +598,11 @@ optional_dep () {
 
 # An assoc-list of c++ code to test if a library works
 # TODO: these are unused.
-lib_test_code=':~
-  ~boost_serialization:
-    #include <fstream>
-    #include <boost/archive/text_oarchive.hpp>
-    #include <boost/archive/text_iarchive.hpp>
-    int main () {
-      std::ofstream ofs("filename");
-      boost::archive::text_oarchive oa(ofs);
-      return 0;
-    }'
+lib_test_code=':~'
 
 # An assoc-list of possible library aliases
 lib_alias=':~
-  ~boost_serialization:boost_serialization-mt~'
+  ~boost_program_options:boost_program_options-mt~'
 
 # List the paths where static libraries can be found into the try_lib_paths variable
 build_try_lib_paths () {
