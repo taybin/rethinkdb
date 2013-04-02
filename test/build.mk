@@ -1,6 +1,6 @@
 
-TEST_FILTER := '*'
-RUN_TEST_ARGS ?=
+TEST_FILTER := default
+RUN_TEST_ARGS := -d /dev/shm
 
 $/bench/stress-client/stress:
 	$P MAKE -C $/bench/stress-client

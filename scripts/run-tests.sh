@@ -13,27 +13,41 @@ verbose=false
 single_test=
 parallel_tasks=1
 repeats=1
-xml_report=
 run_dir=
 run_elsewhere=false
 
 # Print usage
 usage () {
     echo "Run the integration tests for rethinkdb"
-    echo "usage: $0 [..]"
+    echo "Usage: $0 [..]"
     echo "   -l              List tests"
-    echo "   -f <filter>     Filter tests (eg: 'split-workloads-*', '*python*', 'all' or '!long')"
+    echo "   -f <filter>     Filter tests (default: 'default')"
     echo "   -o <output_dir> Set output folder (default: test_results.XXXXX)"
     echo "   -h              This help"
     echo "   -v              More verbose"
     echo "   -j <tasks>      Run tests in parallel"
     echo "   -r <repeats>    Repeat each test"
     echo "   -d <run_dir>    Run the tests in a different folder (eg: /dev/shm)"
-    # echo "   -x  Generate an xml report"
+    echo "   -s <name> -- <command>  For internal use only"
+    echo "Output Directory Format:"
+    echo "   A folder is created for each test. Files in the folder contain the command"
+    echo "   line for the test, the test result and the test output."
+    echo "Input Directory Format:"
+    echo "    The input directory, test/full_tests, contains .test files that generate a"
+    echo "    list of all the tests and .group files that contain test filters."
+    echo "Filter Syntax:"
+    echo "   -f <test_name>   Select a specific test"
+    echo "   -f <test_group>  Select all the tests of a group"
+    echo "   -f <a> -f !<b>   Select all tests selected by a, except for those selected by b"
+    echo "   -f <pattern>     Select all tests matching the pattern, in which * is a wildcard"
+    echo "Examples:"
+    echo "   $0 -l -v -f disabled           List the command line for all the disabled tests"
+    echo "   $0 -j 12 -r 3 -f 'interface*'  Run all interface tests three times, using 12 concurrent tasks"
+    echo "   $0 -d /dev/shm                 Run the default tests on a memory backed partition"
 }
 
 # Parse the command line options
-while getopts ":lf:o:hvs:j:r:x:d:" opt; do
+while getopts ":lf:o:hvs:j:r:d:" opt; do
     case $opt in
         l) list_only=true ;;
         f) test_filter="$test_filter $(printf %q "$OPTARG")" ;;
@@ -43,7 +57,6 @@ while getopts ":lf:o:hvs:j:r:x:d:" opt; do
         s) single_test=$OPTARG ;;
         j) parallel_tasks=$OPTARG ;;
         r) repeats=$OPTARG ;;
-        x) xml_report=$OPTARG ;;
         d) run_dir=$OPTARG ; run_elsewhere=true ;;
         *) echo Error: -$OPTARG ; usage; exit 1 ;;
     esac
@@ -54,11 +67,11 @@ if [[ -z "$test_filter" ]]; then
 fi
 
 # Remove parsed arguments from $*
-shift $[OPTIND-1]
+shift $((OPTIND-1))
 
 # Get the absolute path to a folder
 absdir () {
-    ( cd $1; pwd )
+    ( cd $1 && pwd )
 }
 
 # Path to the rethinkdb repository
@@ -80,7 +93,7 @@ run_single_test () {
               echo "Error: unable to create temporary directory in $run_dir"
               exit 1
           fi
-          trap "rm -rf $(printf %q $elsewhere)" EXIT
+          trap "rm -rf $(printf %q "$elsewhere")" EXIT
         fi
         ( $run_elsewhere && cd "$elsewhere"
           mkdir files-$index
@@ -115,52 +128,64 @@ if [[ -n "$*" ]]; then
     exit 1
 fi
 
-# Make sure the output directory does not already exist
-if [[ -z "$dir" ]]; then
-    dir="`mktemp -d "test_results.XXXXX"`"
-else
-    test -d "$dir" && echo "Error: the folder '$dir' already exists" && exit 1
-fi
-
-# Use a tmp directory when none is needed
+# Find or create the output_dir and list_dir
 if $list_only; then
     list_dir=`mktemp -t -d run-tests.XXXXXXXX`
 else
+    if [[ -z "$dir" ]]; then
+        if ! dir=$(mktemp -d "test_results.XXXXX"); then
+            echo "Error: unable to create output directory"
+            exit 1
+        fi
+    else
+        test -e "$dir" && echo "Error: the folder '$dir' already exists" && exit 1
+    fi
     list_dir=$dir/.tests
     mkdir -p "$list_dir"
 fi
 
 # List all the tests
-"$root"/scripts/generate_test_param_files.py --test-dir "$root/test/full_test/" --output-dir $list_dir --rethinkdb-root "$root" >/dev/null || exit 1
+"$root"/scripts/generate_test_param_files.py --test-dir "$root/test/full_test/" --output-dir "$list_dir" --rethinkdb-root "$root" >/dev/null || exit 1
 all_tests="$(for f in "$list_dir"/*.param; do basename "$f" .param; done)"
+
+# filter_tests <negate> <filters> <tests>
+# Apply the filters or their opposite to the tests
 filter_tests () {
     local negate
     local filters=$2
-    local selected_tests=$3
+    local tests=$3
     for filter in $filters; do
         negate=$1
+
+        # Negate the current filter
         if [[ "${filter:0:2}" = '\!' ]]; then
-            negate=$[!negate]
+            negate=$((!negate))
             filter=${filter:2}
         fi
+
+        # If the filter is a group, include the tests from that group
         group="$root/test/full_test/$filter.group"
         if [[ -f "$group" ]]; then
             group_filters=$(cat "$group" | sed 's/#.*//' | grep -v '^$' | while read -r line; do printf "%q " "$line"; done)
-            selected_tests=$(filter_tests $negate "$group_filters" "$selected_tests")
+            tests=$(filter_tests $negate "$group_filters" "$tests")
             continue
         fi
+
+        # If the filter is a pattern
         if [[ $negate = 1 ]] || echo "$filter" | grep -q '[*]'; then
             eval filter=$filter
             if [[ $negate = 0 ]]; then
-                selected_tests=$(
+                # Include all the tests that match a positive pattern
+                tests=$(
                     for t in $all_tests; do
                         if [[ "${t##$filter}" = "" ]]; then
                             echo $t
                         fi
                     done )
             else
-                selected_tests=$(
-                    for t in $selected_tests; do
+                # exclude all the tests that match a negative pattern
+                tests=$(
+                    for t in $tests; do
                         if [[ "${t##$filter}" != "" ]]; then
                             echo $t
                         fi
@@ -168,14 +193,17 @@ filter_tests () {
             fi
             continue
         fi
+
+        # If the filter is a single test, include that test
         if [[ -e "$list_dir/$filter.param" ]]; then
-            selected_tests="$selected_tests $filter"
+            tests="$tests $filter"
             continue
         fi
+
         echo "Error: Non-existing test '$filter'" >&2
         exit 1
     done
-    echo "$selected_tests"
+    echo "$tests"
 }
 selected_tests=$(filter_tests 0 "$test_filter" "")
 
@@ -186,7 +214,7 @@ total=0
 list=()
 
 list_groups () {
-    # FIXME: this is very slow
+    # This is very slow
     groups=
     for group in "$root"/test/full_test/*.group; do
         name=$(basename "$group" .group)
@@ -198,21 +226,21 @@ list_groups () {
 }
 
 # List all the tests
-for test in $selected_tests; do
-    path="$list_dir/$test.param"
-    cmd=`cat $path | grep ^TEST_COMMAND | sed 's/^TEST_COMMAND=//'`
+for name in $selected_tests; do
+    path="$list_dir/$name.param"
+    cmd=`cat $path | sed -n 's/^TEST_COMMAND=//p'`
     if $list_only; then
         if $verbose; then
-            echo $test "("$(list_groups "$test")")": $cmd
+            echo $name "("$(list_groups "$name")")": $cmd
         else
-            echo $test
+            echo $name
         fi
         continue
     fi
-    total=$[ total + repeats ]
-    mkdir "$dir/$test"
-    echo "$cmd" > "$dir/$test/command_line"
-    list+=("$test^$cmd")
+    total=$(( total + repeats ))
+    mkdir "$dir/$name"
+    echo "$cmd" > "$dir/$name/command-line"
+    list+=("$name^$cmd")
 done
 
 if $list_only; then
@@ -236,24 +264,19 @@ for item in "${list[@]}"; do
 done | xargs -d '\n' -n 1 --max-procs=$parallel_tasks -I@ bash -c @
 trap - INT
 
-# Write the XML output file
-if [[ -n "$xml_report" ]]; then
-    # TODO
-    echo Error: XML reports not implemented
-    exit 1
-fi
-
 # Collect the results
 passed=$(cat "$dir/"*/return-code-* 2>/dev/null | grep '^0$' | wc -l)
 
 end_time=$(date +%s)
-duration=$[end_time - start_time]
-duration_str=$[duration/60]'m'$[duration%60]'s'
+duration=$((end_time - start_time))
+duration_str=$((duration/60))'m'$((duration%60))'s'
 
 if [[ $passed = $total ]]; then
     echo Passed all $total tests in $duration_str.
+    exit_code=0
 else
-    echo Failed $[total - passed] of $total tests in $duration_str.
-    echo "Stored the output of the tests in '$dir'"
-    exit 1
+    echo Failed $((total - passed)) of $total tests in $duration_str.
+    exit_code=1
 fi
+echo "Stored the output of the tests in '$dir'"
+exit $exit_code
