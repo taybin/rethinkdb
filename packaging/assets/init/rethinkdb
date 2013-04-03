@@ -6,7 +6,7 @@
 
 ### BEGIN INIT INFO
 # Provides:          rethinkdb
-# Required-Start: $remote_fs 
+# Required-Start: $remote_fs
 # Required-Stop: $remote_fs
 # Default-Start:     2 3 4 5
 # Default-Stop:      0 1 6
@@ -110,16 +110,12 @@ do
 
     instance_name=`basename "$rtdbconffile" .conf`
 
-    # $@ will contain the options we pass to start-stop-daemon
-    set -- # empty $@
-
     get "$conf" runuser || runuser=rethinkdb
-    set -- "$@" --chuid "$runuser"
-    
     get "$conf" rungroup || rungroup=rethinkdb
-    set -- "$@" --group "$rungroup"
 
-    set -- "$@" -- --config-file "$rtdbconffile"
+    # $@ will contain the options we pass to rethinkdb
+    set -- # empty $@
+    set -- --config-file "$rtdbconffile"
 
     # If no pid file is specified, assign one and make sure the parent folder has the correct permissions
     if ! get "$conf" pid-file rtdbpidfile; then
@@ -131,7 +127,7 @@ do
                 test -n "${rungroup:-}" && chgrp -- "$rungroup" "$parent_directory"
             fi
         fi
-        
+
         set -- "$@" --pid-file "$rtdbpidfile"
     fi
 
@@ -145,7 +141,7 @@ do
                 test -n "${rungroup:-}" && chgrp -- "$rungroup" "$parent_directory"
             fi
         fi
-        set -- "$@" --directory "$rtdb_directory" 
+        set -- "$@" --directory "$rtdb_directory"
     fi
 
     # Only one of the instances can use the default ports
@@ -198,7 +194,7 @@ do
                 rm "$rtdbpidfile"
             fi
             echo "rethinkdb: $instance_name: Starting instance. (logging to \`$rtdb_directory/log_file')"
-            start-stop-daemon --start --pidfile "$rtdbpidfile" --startas "$rtdbbin" --background "$@"
+            "$rtdbbin" --daemon "$@"
         fi
     fi
 
@@ -207,7 +203,7 @@ do
 
         if [ -e "$rtdbpidfile" ] ; then
             if ! is_running "$(cat "$rtdbpidfile")"; then
-                echo "rethinkdb: $instance_name: stop/crashed"
+                echo "rethinkdb: $instance_name: stopped"
             else
                 echo "rethinkdb: $instance_name: start/running, pid `cat "$rtdbpidfile"`"
             fi
