@@ -159,7 +159,7 @@ filter_tests () {
 
         # Negate the current filter
         if [[ "${filter:0:2}" = '\!' ]]; then
-            negate=$((!negate))
+            negate=$((! negate))
             filter=${filter:2}
         fi
 

@@ -11,7 +11,7 @@ parser.add_option("--test-dir", action="store", dest = "test_dir")
 parser.add_option("--output-dir", action="store", dest="output_dir")
 parser.set_defaults(output_dir = ".")
 parser.add_option("--rethinkdb-root", action="store", dest="rethinkdb_root")
-parser.set_defaults(rethinkdb_root = "..")
+parser.set_defaults(rethinkdb_root = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir)))
 (options, args) = parser.parse_args()
 assert not args
 
